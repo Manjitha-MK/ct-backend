@@ -2,31 +2,9 @@ import fs from "fs";
 import path from "path";
 import mongoose from "mongoose";
 import Player from "../models/Player.js";
+import cloudinary from "../config/cloudinary.js";
 
 // CREATE PLAYER
-// export const createPlayer = async (req, res) => {
-//   try {
-//     const player = await Player.create({
-//       ...req.body,
-//       playerImage: req.file ? req.file.filename : "",
-//     });
-
-//     res.status(201).json(player);
-//   } catch (error) {
-//     console.log("CREATE ERROR:", error);
-
-//     if (error.code === 11000) {
-//       return res.status(400).json({
-//         message:
-//           "Jersey number already exists. Please choose a unique jersey number.",
-//       });
-//     }
-
-//     res.status(500).json({
-//       message: error.message,
-//     });
-//   }
-// };
 
 export const createPlayer = async (req, res) => {
   try {
@@ -38,8 +16,14 @@ export const createPlayer = async (req, res) => {
       totalWickets: Number(req.body.totalWickets || 0),
       dateOfBirth: req.body.dateOfBirth || null,
       isCaptain: req.body.isCaptain === "true" || req.body.isCaptain === true,
-      isViceCaptain: req.body.isViceCaptain === "true" || req.body.isViceCaptain === true,
-      playerImage: req.file ? req.file.path : "",
+      isViceCaptain:
+        req.body.isViceCaptain === "true" || req.body.isViceCaptain === true,
+      playerImage: req.file
+        ? {
+            url: req.file.path,
+            public_id: req.file.filename,
+          }
+        : null,
     };
 
     // 🧢 ENFORCE SINGLE CAPTAIN
@@ -89,47 +73,6 @@ export const getSinglePlayer = async (req, res) => {
   }
 };
 
-// UPDATE PLAYER
-// export const updatePlayer = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     const updatedData = {
-//       ...req.body,
-//     };
-
-//     // If new image uploaded, update it
-//     if (req.file) {
-//       updatedData.playerImage = req.file.filename;
-//     }
-
-//     const player = await Player.findByIdAndUpdate(id, updatedData, {
-//       returnDocument: "after",
-//       runValidators: true,
-//     });
-
-//     if (!player) {
-//       return res.status(404).json({
-//         message: "Player not found",
-//       });
-//     }
-
-//     res.status(200).json(player);
-//   } catch (error) {
-//     console.log("CREATE ERROR:", error);
-
-//     if (error.code === 11000) {
-//       return res.status(400).json({
-//         message:
-//           "Jersey number already exists. Please choose a unique jersey number.",
-//       });
-//     }
-//     res.status(500).json({
-//       message: error.message,
-//     });
-//   }
-// };
-
 export const updatePlayer = async (req, res) => {
   try {
     const player = await Player.findById(req.params.id);
@@ -164,15 +107,16 @@ export const updatePlayer = async (req, res) => {
 
     // 🧢 CAPTAIN LOGIC
     const isCaptain = body.isCaptain === "true" || body.isCaptain === true;
-    const isViceCaptain = body.isViceCaptain === "true" || body.isViceCaptain === true;
+    const isViceCaptain =
+      body.isViceCaptain === "true" || body.isViceCaptain === true;
 
     if (isCaptain) {
       await Player.updateMany(
         { _id: { $ne: player._id } },
-        { isCaptain: false }
+        { isCaptain: false },
       );
       player.isCaptain = true;
-      player.isViceCaptain = false; // safety rule
+      player.isViceCaptain = false;
     } else {
       player.isCaptain = false;
     }
@@ -180,15 +124,34 @@ export const updatePlayer = async (req, res) => {
     if (isViceCaptain) {
       await Player.updateMany(
         { _id: { $ne: player._id } },
-        { isViceCaptain: false }
+        { isViceCaptain: false },
       );
       player.isViceCaptain = true;
-      player.isCaptain = false; // safety rule
+      player.isCaptain = false;
     }
 
-    // image
+    // =========================
+    // ✅ IMAGE UPDATE FIX
+    // =========================
     if (req.file) {
-      player.playerImage = req.file.path;
+      // STEP 1: DELETE OLD IMAGE FIRST
+      if (
+        player.playerImage &&
+        typeof player.playerImage === "object" &&
+        player.playerImage.public_id
+      ) {
+        try {
+          await cloudinary.uploader.destroy(player.playerImage.public_id);
+        } catch (err) {
+          console.log("Cloudinary delete error:", err.message);
+        }
+      }
+
+      // STEP 2: SET NEW IMAGE
+      player.playerImage = {
+        url: req.file.path,
+        public_id: req.file.filename,
+      };
     }
 
     const updatedPlayer = await player.save();
@@ -198,54 +161,21 @@ export const updatePlayer = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-// DELETE PLAYER
-// export const deletePlayer = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     const player = await Player.findById(id);
-
-//     if (!player) {
-//       return res.status(404).json({
-//         message: "Player not found",
-//       });
-//     }
-
-//     // SAFE IMAGE DELETE
-//     if (player.playerImage) {
-//       const imagePath = path.join(process.cwd(), "uploads", player.playerImage);
-
-//       try {
-//         if (fs.existsSync(imagePath)) {
-//           fs.unlinkSync(imagePath);
-//         }
-//       } catch (fileError) {
-//         console.log("File delete error:", fileError.message);
-//       }
-//     }
-
-//     await Player.findByIdAndDelete(id);
-
-//     res.status(200).json({
-//       message: "Player deleted successfully",
-//     });
-//   } catch (error) {
-//     console.log("DELETE ERROR:", error);
-//     res.status(500).json({
-//       message: error.message,
-//     });
-//   }
-// };
 
 export const deletePlayer = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const player = await Player.findByIdAndDelete(id);
+    const player = await Player.findById(req.params.id);
 
     if (!player) {
       return res.status(404).json({ message: "Player not found" });
     }
+
+    // delete image from cloudinary
+    if (player.playerImage?.public_id) {
+      await cloudinary.uploader.destroy(player.playerImage.public_id);
+    }
+
+    await Player.findByIdAndDelete(req.params.id);
 
     res.json({ message: "Player deleted successfully" });
   } catch (error) {
